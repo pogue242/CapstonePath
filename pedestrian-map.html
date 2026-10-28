@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pedestrian paths · OpenStreetMap + Leaflet</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<style>
+  :root {
+    --bg: #fbfbf9; --fg: #1d2530; --muted: #5d6877; --line: #d9dde3; --accent: #1f6f78;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1a2028; --fg: #e8ecf1; --muted: #9aa5b4; --line: #333d4a; --accent: #5cc4cf; }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { font: 15px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--fg); background: var(--bg); display: flex; flex-direction: column; }
+  header { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  form { display: flex; gap: 6px; flex: 1 1 280px; max-width: 480px; }
+  input[type=text] { flex: 1; padding: 8px 10px; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+  button { padding: 8px 12px; font: inherit; color: #fff; background: var(--accent); border: 0; border-radius: 6px; cursor: pointer; }
+  button.secondary { color: var(--fg); background: transparent; border: 1px solid var(--line); }
+  button:disabled { opacity: .5; cursor: wait; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  #status { color: var(--muted); font-size: 13px; flex: 1 1 100%; min-height: 1.4em; }
+  #map { flex: 1; min-height: 0; }
+  .legend { background: var(--bg); color: var(--fg); padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; line-height: 1.7; }
+  .legend label { display: flex; align-items: center; gap: 7px; cursor: pointer; }
+  .swatch { width: 22px; height: 0; border-top: 4px solid; }
+  .swatch.dashed { border-top-style: dashed; }
+</style>
+</head>
+<body>
+<header>
+  <form id="search">
+    <input id="city" type="text" placeholder="City name, e.g. Lisbon" aria-label="City name" required>
+    <button id="go" type="submit">Show paths</button>
+  </form>
+  <button id="view" class="secondary" type="button" title="Load paths for the area currently on screen">Load current view</button>
+  <div id="status" role="status">Search a city, or zoom in and use “Load current view”.</div>
+</header>
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+/* ---------- 1. Base map ---------- */
+const map = L.map('map', { preferCanvas: true }).setView([30, 10], 2);
+// Official OSM tiles require a Referer header, so this page must be served over http(s)
+// (e.g. http://localhost:8000 or a real website), not opened as a file:// URL.
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19,
+  referrerPolicy: 'strict-origin-when-cross-origin',
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+}).addTo(map);
+
+if (location.protocol === 'file:') {
+  document.getElementById('status').textContent =
+    'Opened from a file: OSM tiles and search will be blocked. Serve this folder over http (see the note in the code).';
+}
+
+/* ---------- 2. Path categories (what counts as "pedestrian") ---------- */
+const CATEGORIES = {
+  footway:    { label: 'Footways',            color: '#d1495b', weight: 2.5, on: true  },
+  pedestrian: { label: 'Pedestrian streets',  color: '#6a4c93', weight: 3,   on: true  },
+  path:       { label: 'Paths',               color: '#2e8b57', weight: 2.5, on: true  },
+  steps:      { label: 'Steps',               color: '#e08e0b', weight: 3,   on: true,  dash: '4 4' },
+  crossing:   { label: 'Crossings',           color: '#2b7bb9', weight: 2,   on: true },
+  sidewalk:   { label: 'Sidewalks', color: '#3d3c3f', weight: 1.5, on: true }
+};
+const groups = {};
+for (const key in CATEGORIES) {
+  groups[key] = L.layerGroup();
+  if (CATEGORIES[key].on) groups[key].addTo(map);
+}
+
+function categorize(tags) {
+  if (tags.highway === 'footway') {
+    if (tags.footway === 'sidewalk') return 'sidewalk';
+    if (tags.footway === 'crossing') return 'crossing';
+    return 'footway';
+  }
+  return tags.highway; // pedestrian | path | steps
+}
+
+/* ---------- 3. Legend with on/off toggles ---------- */
+const legend = L.control({ position: 'bottomright' });
+legend.onAdd = () => {
+  const div = L.DomUtil.create('div', 'legend');
+  for (const key in CATEGORIES) {
+    const c = CATEGORIES[key];
+    const row = L.DomUtil.create('label', '', div);
+    row.innerHTML =
+      `<input type="checkbox" ${c.on ? 'checked' : ''}>` +
+      `<span class="swatch ${c.dash ? 'dashed' : ''}" style="border-color:${c.color}"></span>${c.label}`;
+    row.querySelector('input').addEventListener('change', e =>
+      e.target.checked ? groups[key].addTo(map) : map.removeLayer(groups[key]));
+  }
+  L.DomEvent.disableClickPropagation(div);
+  return div;
+};
+legend.addTo(map);
+
+/* ---------- 4. Geocode the city (Nominatim) ---------- */
+async function geocode(name) {
+  const url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&q=' + encodeURIComponent(name);
+  const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+  if (!res.ok) throw new Error('Geocoding failed (' + res.status + ')');
+  const hits = await res.json();
+  if (!hits.length) throw new Error('No place found for “' + name + '”.');
+  // Prefer an administrative boundary (relation) so we can query by area
+  return hits.find(h => h.osm_type === 'relation') || hits[0];
+}
+
+/* ---------- 5. Fetch ways from Overpass ---------- */
+const OVERPASS = 'https://overpass-api.de/api/interpreter';
+const HIGHWAYS = 'footway|pedestrian|path|steps';
+
+async function overpass(filterBlock) {
+  const query = `[out:json][timeout:90];${filterBlock}out geom;`;
+  const res = await fetch(OVERPASS, { method: 'POST', body: 'data=' + encodeURIComponent(query) });
+  if (!res.ok) throw new Error('Overpass error ' + res.status + ' – try a smaller area.');
+  return (await res.json()).elements;
+}
+
+const queryByArea = osmId =>
+  overpass(`area(${osmId})->.a;way["highway"~"^(${HIGHWAYS})$"](area.a);`);
+
+const queryByBbox = (s, w, n, e) =>
+  overpass(`way["highway"~"^(${HIGHWAYS})$"](${s},${w},${n},${e});`);
+
+/* ---------- 6. Draw ---------- */
+function clearPaths() { for (const k in groups) groups[k].clearLayers(); }
+
+function draw(ways) {
+  clearPaths();
+  const counts = {};
+  for (const w of ways) {
+    if (!w.geometry) continue;
+    const tags = w.tags || {};
+    const cat = categorize(tags);
+    const style = CATEGORIES[cat];
+    if (!style) continue;
+    counts[cat] = (counts[cat] || 0) + 1;
+
+    const line = L.polyline(w.geometry.map(p => [p.lat, p.lon]), {
+      color: style.color, weight: style.weight, opacity: 0.9, dashArray: style.dash || null
+    });
+    const rows = ['name', 'highway', 'surface', 'width', 'incline', 'lit', 'wheelchair']
+      .filter(k => tags[k]).map(k => `<b>${k}</b>: ${escapeHtml(tags[k])}`).join('<br>');
+    line.bindPopup(`${rows || 'unnamed way'}<br><a href="https://www.openstreetmap.org/way/${w.id}" target="_blank" rel="noopener">View on OSM</a>`);
+    groups[cat].addLayer(line);
+  }
+  return counts;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+/* ---------- 7. UI wiring ---------- */
+const statusEl = document.getElementById('status');
+const buttons = [document.getElementById('go'), document.getElementById('view')];
+const setBusy = (busy, msg) => { buttons.forEach(b => b.disabled = busy); statusEl.textContent = msg; };
+
+function summary(counts) {
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  return total
+    ? `Loaded ${total.toLocaleString()} ways. ` + Object.entries(counts).map(([k, v]) => `${CATEGORIES[k].label}: ${v.toLocaleString()}`).join(' · ')
+    : 'No pedestrian ways found here.';
+}
+
+document.getElementById('search').addEventListener('submit', async e => {
+  e.preventDefault();
+  const name = document.getElementById('city').value.trim();
+  if (!name) return;
+  try {
+    setBusy(true, 'Finding ' + name + '…');
+    const place = await geocode(name);
+    const [s, n, w, ea] = place.boundingbox.map(Number);
+    map.fitBounds([[s, w], [n, ea]]);
+
+    setBusy(true, 'Downloading pedestrian paths (large cities can take a minute)…');
+    let ways;
+    if (place.osm_type === 'relation')      ways = await queryByArea(3600000000 + Number(place.osm_id));
+    else if (place.osm_type === 'way')      ways = await queryByArea(2400000000 + Number(place.osm_id));
+    else                                    ways = await queryByBbox(s, w, n, ea);
+
+    setBusy(false, summary(draw(ways)));
+  } catch (err) {
+    setBusy(false, err.message);
+  }
+});
+
+document.getElementById('view').addEventListener('click', async () => {
+  if (map.getZoom() < 13) { statusEl.textContent = 'Zoom in a little further (level 13+), then try again.'; return; }
+  try {
+    setBusy(true, 'Downloading paths for this view…');
+    const b = map.getBounds();
+    const ways = await queryByBbox(b.getSouth(), b.getWest(), b.getNorth(), b.getEast());
+    setBusy(false, summary(draw(ways)));
+  } catch (err) {
+    setBusy(false, err.message);
+  }
+});
+</script>
+</body>
+</html>
