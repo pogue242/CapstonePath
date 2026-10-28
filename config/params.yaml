@@ -1,0 +1,45 @@
+candidates:
+  min_euclid_m: 8
+  max_euclid_m: 150
+  detour_ratio_min: 2.5
+  block_perimeter_step_m: 10
+  dedupe_endpoint_m: 10
+  stairs_max_euclid_m: 60
+  parallel_angle_deg: 30
+  min_face_area_m2: 30
+  improvement_budget: 3
+  recall_target_per_class: 0.60
+  recall_stop_below: 0.30
+
+cv:
+  n_folds: 5
+  algorithm: greedy_balance_by_positive_count
+
+model:
+  lightgbm:
+    search: random
+    n_configs: 20
+    seed: 42
+    space:
+      num_leaves: [15, 31, 63]
+      learning_rate: [0.03, 0.05, 0.1]
+      n_estimators: [200, 400, 800]
+      min_child_samples: [20, 50, 100]
+      feature_fraction: [0.6, 0.8, 1.0]
+      scale_pos_weight: ["auto", 5, 20]
+  calibration: isotonic
+
+routing:
+  n_pairs: 300
+  seed: 42
+  pair_distance_from_candidate_m: [60, 150]
+  step_free_profile: false
+
+ui:
+  api_port: 8000
+  basemap: osm_raster
+  verdicts_file: reports/verdicts.jsonl
+
+paths:
+  cache_dir: data/interim
+  reports_dir: reports

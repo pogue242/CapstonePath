@@ -1,0 +1,40 @@
+data:
+  gip_network_glob: "data/**/gip_network_ogd.gpkg"
+  gip_reference_glob: "data/**/gip_reference_ogd.gpkg"
+  gip_lut_dir_glob: "data/**/lut_form_of_way*.csv"
+  osm_pbf: "data/**/austria-260922.osm.pbf"
+  gip_release: "26.04"
+  osm_snapshot: "2026-09-22"
+
+cities:
+  vienna:
+    place: "Wien, Austria"
+    crs: "EPSG:31256"
+    gip_labels: true
+    districts: {source: osm_admin_level, admin_level: 9}
+    station_filter: {subnets: [315, 12003, 318], general_rule: true}
+  graz:
+    place: "Graz, Austria"
+    crs: "EPSG:31256"
+    gip_labels: true
+    station_filter: {subnets: [], general_rule: true}
+  salzburg:
+    place: "Salzburg, Austria"
+    crs: "EPSG:31255"
+    gip_labels: true
+    station_filter: {subnets: [], general_rule: true}
+  innsbruck:
+    place: "Innsbruck, Austria"
+    crs: "EPSG:31254"
+    gip_labels: true
+    station_filter: {subnets: [], general_rule: true}
+  linz:
+    place: "Linz, Austria"
+    crs: "EPSG:31255"
+    gip_labels: true
+    station_filter: {subnets: [], general_rule: true}
+  klagenfurt:
+    place: "Klagenfurt am Wörthersee, Austria"
+    crs: "EPSG:31255"
+    gip_labels: true
+    station_filter: {subnets: [], general_rule: true}

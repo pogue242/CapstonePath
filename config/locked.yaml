@@ -1,0 +1,39 @@
+seed: 42
+
+vienna_test_districts: ["Innere Stadt", "Neubau", "Favoriten", "Donaustadt"]
+test_district_backup_order: ["Leopoldstadt", "Margareten", "Landstraße"]
+min_test_features_per_stratum: 30
+split_buffer_m: 200
+
+strata:
+  passage_historic_subnets: [307]
+  passage_estate_subnets: [319, 320]
+  station_subnets_excluded: [315, 12003, 318]
+
+transfer_area: [graz, salzburg, innsbruck]
+transfer_min_features: 150
+
+match:
+  tol_m: 8
+  angle_deg: 35
+  step_m: 2
+  matched_min_coverage: 0.8
+  partial_min_coverage: 0.3
+label:
+  position_tol_m: 10
+  angle_deg: 35
+
+primary_metric: precision_at_k
+primary_k: 50
+report_k: [10, 25, 50, 100]
+nms_endpoint_distance_m: 15
+bootstrap:
+  reps: 1000
+  block_m: 1000
+  ci: 0.95
+baselines: [random, detour_ratio, logistic_regression]
+strongest_baseline_selection: cv_on_non_test_districts
+success:
+  min_relative_improvement: 0.20
+  baseline_zero_min_precision: 0.10
+  require_ci_excludes_zero: true
