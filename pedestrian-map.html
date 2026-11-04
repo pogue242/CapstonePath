@@ -17,6 +17,8 @@
   html, body { height: 100%; margin: 0; }
   body { font: 15px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--fg); background: var(--bg); display: flex; flex-direction: column; }
   header { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  #routeForm { flex: 3 1 560px; max-width: 820px; flex-wrap: wrap; }
+  #routeForm input[type=text] { flex: 1 1 170px; min-width: 0; }
   form { display: flex; gap: 6px; flex: 1 1 280px; max-width: 480px; }
   input[type=text] { flex: 1; padding: 8px 10px; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
   button { padding: 8px 12px; font: inherit; color: #fff; background: var(--accent); border: 0; border-radius: 6px; cursor: pointer; }
@@ -35,13 +37,19 @@
 </head>
 <body>
 <header>
+  <form id="routeForm">
+    <input id="from" type="text" placeholder="From: address, place, or lat, lon" aria-label="Origin" autocomplete="off">
+    <button id="swap" type="button" class="secondary" title="Swap origin and destination" aria-label="Swap">⇄</button>
+    <input id="to" type="text" placeholder="To: address, place, or lat, lon" aria-label="Destination" autocomplete="off">
+    <button id="routeGo" type="submit">Route</button>
+    <button id="pick" type="button" class="secondary" title="Click the map to set A, then B">Pick on map</button>
+  </form>
   <form id="search">
     <input id="city" type="text" placeholder="City name, e.g. Lisbon" aria-label="City name" required>
     <button id="go" type="submit">Show paths</button>
   </form>
   <button id="view" class="secondary" type="button" title="Load paths for the area currently on screen">Load current view</button>
-  <button id="route" class="secondary" type="button" title="Click two points on the map to get a walking route">Route A → B</button>
-  <div id="status" role="status">Search a city, or zoom in and use “Load current view”.</div>
+  <div id="status" role="status">Type an origin and a destination, or turn on “Pick on map” and click. Use the city box to show the path overview.</div>
 </header>
 <div id="map"></div>
 
@@ -166,7 +174,7 @@ function escapeHtml(s) {
 
 /* ---------- 7. UI wiring ---------- */
 const statusEl = document.getElementById('status');
-const buttons = [document.getElementById('go'), document.getElementById('view')];
+const buttons = ['go', 'view', 'routeGo'].map(id => document.getElementById(id));
 const setBusy = (busy, msg) => { buttons.forEach(b => b.disabled = busy); statusEl.textContent = msg; };
 
 function summary(counts) {
@@ -216,8 +224,7 @@ document.getElementById('view').addEventListener('click', async () => {
 const WALKABLE = 'way["highway"]["highway"!~"^(motorway|motorway_link|trunk|trunk_link|cycleway|bridleway|proposed|construction|raceway|bus_guideway|escape)$"]["foot"!="no"]["access"!="private"]';
 const WALK_SPEED = 1.39; // m/s, about 5 km/h
 const routeLayer = L.layerGroup().addTo(map);
-const routeBtn = document.getElementById('route');
-let routeMode = false, clicks = [];
+let routeMode = false; // "Pick on map" mode
 
 const haversine = (a, b) => {
   const R = 6371000, rad = Math.PI / 180;
@@ -324,7 +331,10 @@ async function computeRoute(a, b) {
   if (haversine({ lat: a.lat, lon: a.lng }, { lat: b.lat, lon: b.lng }) > 16000) {
     throw new Error('Those points are more than 16 km apart. Pick closer points, or use a routing server (see notes).');
   }
-  const ways = await overpass(`${WALKABLE}(${s},${w},${n},${e});`);
+  // Same overpass() call, endpoint and OSM data as the overview. The network is the overview's
+  // pedestrian ways (same HIGHWAYS filter) plus ordinary walkable streets, so every drawn path is routable.
+  const box = `(${s},${w},${n},${e})`;
+  const ways = await overpass(`(${WALKABLE}${box};way["highway"~"^(${HIGHWAYS})$"]${box};);`);
   const nodes = buildGraph(ways);
   if (!nodes.length) throw new Error('No walkable network found around those points.');
   const A = nearestNode(nodes, a), B = nearestNode(nodes, b);
@@ -334,33 +344,105 @@ async function computeRoute(a, b) {
   return r;
 }
 
-function resetRoute() { routeLayer.clearLayers(); clicks = []; }
+/* ---------- 9. Origin / destination: search boxes first, map clicks as an option ---------- */
+const fromEl = document.getElementById('from'), toEl = document.getElementById('to');
+const inputOf = which => (which === 'A' ? fromEl : toEl);
+const pts = { A: null, B: null }, markers = {};
+let routeLine = null, lastGeocode = 0;
+const COORDS = /^\s*(-?\d{1,3}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)\s*$/;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-routeBtn.addEventListener('click', () => {
-  routeMode = !routeMode;
-  routeBtn.classList.toggle('active', routeMode);
-  map.getContainer().classList.toggle('routing', routeMode);
-  resetRoute();
-  statusEl.textContent = routeMode ? 'Route mode: click the start point (A), then the destination (B).' : 'Route mode off.';
-});
+function clearRouteLine() { if (routeLine) { routeLayer.removeLayer(routeLine); routeLine = null; } }
 
-map.on('click', async e => {
-  if (!routeMode) return;
-  map.closePopup();
-  if (clicks.length >= 2) resetRoute();
-  clicks.push(e.latlng);
-  L.marker(e.latlng, { title: clicks.length === 1 ? 'A' : 'B' }).addTo(routeLayer)
-    .bindTooltip(clicks.length === 1 ? 'A' : 'B', { permanent: true, direction: 'top' });
-  if (clicks.length < 2) { statusEl.textContent = 'Now click the destination (B).'; return; }
+function dropMarker(which) {
+  if (markers[which]) { routeLayer.removeLayer(markers[which]); markers[which] = null; }
+}
+
+function setPoint(which, latlng, text) {
+  dropMarker(which);
+  pts[which] = latlng;
+  markers[which] = L.marker(latlng, { title: which }).addTo(routeLayer)
+    .bindTooltip(which, { permanent: true, direction: 'top' });
+  inputOf(which).value = text;
+  clearRouteLine();
+}
+
+function clearPoint(which) {
+  dropMarker(which); pts[which] = null; inputOf(which).value = ''; clearRouteLine();
+}
+
+// Editing a box invalidates the point that was set from it.
+for (const which of ['A', 'B']) {
+  inputOf(which).addEventListener('input', () => { dropMarker(which); pts[which] = null; clearRouteLine(); });
+}
+
+// Nominatim, biased (not restricted) to what is on screen so "Main St" resolves in the city you are viewing.
+async function geocodeNear(text) {
+  const wait = lastGeocode + 1100 - Date.now(); // Nominatim allows 1 request per second
+  if (wait > 0) await sleep(wait);
+  lastGeocode = Date.now();
+  const b = map.getBounds();
+  const view = [b.getWest(), b.getNorth(), b.getEast(), b.getSouth()].join(',');
+  const res = await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&viewbox=' + view +
+    '&q=' + encodeURIComponent(text), { headers: { 'Accept': 'application/json' } });
+  if (!res.ok) throw new Error('Geocoding failed (' + res.status + ')');
+  const hits = await res.json();
+  if (!hits.length) throw new Error('Could not find “' + text + '”.');
+  return L.latLng(+hits[0].lat, +hits[0].lon);
+}
+
+async function resolve(which) {
+  if (pts[which]) return pts[which];
+  const text = inputOf(which).value.trim();
+  if (!text) throw new Error('Enter ' + (which === 'A' ? 'an origin' : 'a destination') + ', or turn on “Pick on map”.');
+  const m = text.match(COORDS);
+  const ll = m ? L.latLng(+m[1], +m[2]) : await geocodeNear(text);
+  setPoint(which, ll, text);
+  return ll;
+}
+
+async function doRoute() {
   try {
+    setBusy(true, 'Finding places…');
+    const a = await resolve('A'), b = await resolve('B');
     setBusy(true, 'Downloading the walkable network and routing…');
-    const r = await computeRoute(clicks[0], clicks[1]);
-    L.polyline(r.path.map(n => [n.lat, n.lon]), { color: '#0b6ef3', weight: 6, opacity: 0.85 }).addTo(routeLayer);
+    const r = await computeRoute(a, b);
+    clearRouteLine();
+    routeLine = L.polyline(r.path.map(n => [n.lat, n.lon]), { color: '#0b6ef3', weight: 6, opacity: 0.85 }).addTo(routeLayer);
+    map.fitBounds(routeLine.getBounds(), { padding: [50, 50] });
     const mins = Math.max(1, Math.round(r.meters / WALK_SPEED / 60));
-    setBusy(false, `Route: ${(r.meters / 1000).toFixed(2)} km, about ${mins} min on foot. Click again to start a new route.`);
+    setBusy(false, `Route: ${(r.meters / 1000).toFixed(2)} km, about ${mins} min on foot.`);
   } catch (err) {
     setBusy(false, err.message);
   }
+}
+
+document.getElementById('routeForm').addEventListener('submit', e => { e.preventDefault(); doRoute(); });
+
+document.getElementById('swap').addEventListener('click', () => {
+  const a = pts.A, b = pts.B, ta = fromEl.value, tb = toEl.value;
+  clearPoint('A'); clearPoint('B');
+  if (b) setPoint('A', b, tb); else fromEl.value = tb;
+  if (a) setPoint('B', a, ta); else toEl.value = ta;
+  if (pts.A && pts.B) doRoute();
+});
+
+// Optional: click the map to set A, then B (a third click starts over).
+document.getElementById('pick').addEventListener('click', e => {
+  routeMode = !routeMode;
+  e.currentTarget.classList.toggle('active', routeMode);
+  map.getContainer().classList.toggle('routing', routeMode);
+  statusEl.textContent = routeMode ? 'Click the map to set A, then B.' : 'Pick on map is off.';
+});
+
+map.on('click', e => {
+  if (!routeMode) return;
+  map.closePopup();
+  if (pts.A && pts.B) { clearPoint('A'); clearPoint('B'); }
+  const which = pts.A ? 'B' : 'A';
+  setPoint(which, e.latlng, e.latlng.lat.toFixed(5) + ', ' + e.latlng.lng.toFixed(5));
+  if (pts.A && pts.B) doRoute();
+  else statusEl.textContent = which === 'A' ? 'Now click the destination (B).' : 'Now click the origin (A).';
 });
 </script>
 </body>
