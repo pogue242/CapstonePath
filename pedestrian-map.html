@@ -27,6 +27,8 @@
   #map { flex: 1; min-height: 0; }
   .legend { background: var(--bg); color: var(--fg); padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; line-height: 1.7; }
   .legend label { display: flex; align-items: center; gap: 7px; cursor: pointer; }
+  .leaflet-container.routing { cursor: crosshair; }
+  button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
   .swatch { width: 22px; height: 0; border-top: 4px solid; }
   .swatch.dashed { border-top-style: dashed; }
 </style>
@@ -38,6 +40,7 @@
     <button id="go" type="submit">Show paths</button>
   </form>
   <button id="view" class="secondary" type="button" title="Load paths for the area currently on screen">Load current view</button>
+  <button id="route" class="secondary" type="button" title="Click two points on the map to get a walking route">Route A → B</button>
   <div id="status" role="status">Search a city, or zoom in and use “Load current view”.</div>
 </header>
 <div id="map"></div>
@@ -149,7 +152,9 @@ function draw(ways) {
     });
     const rows = ['name', 'highway', 'surface', 'width', 'incline', 'lit', 'wheelchair']
       .filter(k => tags[k]).map(k => `<b>${k}</b>: ${escapeHtml(tags[k])}`).join('<br>');
-    line.bindPopup(`${rows || 'unnamed way'}<br><a href="https://www.openstreetmap.org/way/${w.id}" target="_blank" rel="noopener">View on OSM</a>`);
+    const html = `${rows || 'unnamed way'}<br><a href="https://www.openstreetmap.org/way/${w.id}" target="_blank" rel="noopener">View on OSM</a>`;
+    // In route mode the click belongs to routing; the feature popup only opens when route mode is off.
+    line.on('click', ev => { if (!routeMode) L.popup().setLatLng(ev.latlng).setContent(html).openOn(map); });
     groups[cat].addLayer(line);
   }
   return counts;
@@ -200,6 +205,159 @@ document.getElementById('view').addEventListener('click', async () => {
     const b = map.getBounds();
     const ways = await queryByBbox(b.getSouth(), b.getWest(), b.getNorth(), b.getEast());
     setBusy(false, summary(draw(ways)));
+  } catch (err) {
+    setBusy(false, err.message);
+  }
+});
+
+/* ---------- 8. Walking routes between two clicks ---------- */
+// Pedestrians can also use ordinary streets, so routing uses a wider "walkable" network than the
+// display layers above: every highway except motorways, cycleways etc., and nothing tagged foot=no.
+const WALKABLE = 'way["highway"]["highway"!~"^(motorway|motorway_link|trunk|trunk_link|cycleway|bridleway|proposed|construction|raceway|bus_guideway|escape)$"]["foot"!="no"]["access"!="private"]';
+const WALK_SPEED = 1.39; // m/s, about 5 km/h
+const routeLayer = L.layerGroup().addTo(map);
+const routeBtn = document.getElementById('route');
+let routeMode = false, clicks = [];
+
+const haversine = (a, b) => {
+  const R = 6371000, rad = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * rad, dLon = (b.lon - a.lon) * rad;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+};
+
+// Overpass "out geom" gives each way's node ids and coordinates side by side.
+// Ways that share a node id are connected, which is what makes it a graph.
+function buildGraph(ways) {
+  const nodes = new Map();
+  const get = (id, p) => {
+    if (!nodes.has(id)) nodes.set(id, { id, lat: p.lat, lon: p.lon, adj: [] });
+    return nodes.get(id);
+  };
+  for (const w of ways) {
+    if (!w.nodes || !w.geometry) continue;
+    for (let i = 1; i < w.nodes.length; i++) {
+      const pa = w.geometry[i - 1], pb = w.geometry[i];
+      if (!pa || !pb) continue;
+      const a = get(w.nodes[i - 1], pa), b = get(w.nodes[i], pb);
+      const d = haversine(a, b);
+      a.adj.push([b, d]); b.adj.push([a, d]); // one-way tags are ignored for walking
+    }
+  }
+  return keepLargestComponent(nodes);
+}
+
+// Snapping a click to a tiny isolated fragment would make routing fail, so keep only the main network.
+function keepLargestComponent(nodes) {
+  const seen = new Set(); let best = [];
+  for (const start of nodes.values()) {
+    if (seen.has(start)) continue;
+    const comp = [], stack = [start]; seen.add(start);
+    while (stack.length) {
+      const u = stack.pop(); comp.push(u);
+      for (const [v] of u.adj) if (!seen.has(v)) { seen.add(v); stack.push(v); }
+    }
+    if (comp.length > best.length) best = comp;
+  }
+  return best;
+}
+
+const nearestNode = (nodes, latlng) => {
+  const q = { lat: latlng.lat, lon: latlng.lng };
+  let best = null, bd = Infinity;
+  for (const n of nodes) { const d = haversine(q, n); if (d < bd) { bd = d; best = n; } }
+  return { node: best, dist: bd };
+};
+
+// Minimal binary min-heap for the A* open set.
+class Heap {
+  constructor() { this.a = []; }
+  get size() { return this.a.length; }
+  push(item, key) {
+    const a = this.a; a.push([key, item]);
+    for (let i = a.length - 1; i > 0;) {
+      const p = (i - 1) >> 1;
+      if (a[p][0] <= a[i][0]) break;
+      [a[p], a[i]] = [a[i], a[p]]; i = p;
+    }
+  }
+  pop() {
+    const a = this.a, top = a[0], last = a.pop();
+    if (a.length) {
+      a[0] = last;
+      for (let i = 0; ;) {
+        let l = 2 * i + 1, r = l + 1, m = i;
+        if (l < a.length && a[l][0] < a[m][0]) m = l;
+        if (r < a.length && a[r][0] < a[m][0]) m = r;
+        if (m === i) break;
+        [a[m], a[i]] = [a[i], a[m]]; i = m;
+      }
+    }
+    return top[1];
+  }
+}
+
+// A* with straight-line distance as the heuristic (never overestimates, so the route is shortest).
+function astar(start, goal) {
+  const g = new Map([[start, 0]]), prev = new Map(), closed = new Set(), open = new Heap();
+  open.push(start, haversine(start, goal));
+  while (open.size) {
+    const u = open.pop();
+    if (u === goal) break;
+    if (closed.has(u)) continue;
+    closed.add(u);
+    for (const [v, d] of u.adj) {
+      const ng = g.get(u) + d;
+      if (ng < (g.get(v) ?? Infinity)) { g.set(v, ng); prev.set(v, u); open.push(v, ng + haversine(v, goal)); }
+    }
+  }
+  if (start !== goal && !prev.has(goal)) return null;
+  const path = [goal];
+  for (let u = goal; prev.has(u);) { u = prev.get(u); path.push(u); }
+  return { path: path.reverse(), meters: g.get(goal) };
+}
+
+async function computeRoute(a, b) {
+  const pad = Math.max(0.003, 0.3 * Math.max(Math.abs(a.lat - b.lat), Math.abs(a.lng - b.lng)));
+  const s = Math.min(a.lat, b.lat) - pad, n = Math.max(a.lat, b.lat) + pad;
+  const w = Math.min(a.lng, b.lng) - pad, e = Math.max(a.lng, b.lng) + pad;
+  if (haversine({ lat: a.lat, lon: a.lng }, { lat: b.lat, lon: b.lng }) > 16000) {
+    throw new Error('Those points are more than 16 km apart. Pick closer points, or use a routing server (see notes).');
+  }
+  const ways = await overpass(`${WALKABLE}(${s},${w},${n},${e});`);
+  const nodes = buildGraph(ways);
+  if (!nodes.length) throw new Error('No walkable network found around those points.');
+  const A = nearestNode(nodes, a), B = nearestNode(nodes, b);
+  if (A.dist > 300 || B.dist > 300) throw new Error('One of the points is more than 300 m from any walkable way.');
+  const r = astar(A.node, B.node);
+  if (!r) throw new Error('No walking connection found inside this area.');
+  return r;
+}
+
+function resetRoute() { routeLayer.clearLayers(); clicks = []; }
+
+routeBtn.addEventListener('click', () => {
+  routeMode = !routeMode;
+  routeBtn.classList.toggle('active', routeMode);
+  map.getContainer().classList.toggle('routing', routeMode);
+  resetRoute();
+  statusEl.textContent = routeMode ? 'Route mode: click the start point (A), then the destination (B).' : 'Route mode off.';
+});
+
+map.on('click', async e => {
+  if (!routeMode) return;
+  map.closePopup();
+  if (clicks.length >= 2) resetRoute();
+  clicks.push(e.latlng);
+  L.marker(e.latlng, { title: clicks.length === 1 ? 'A' : 'B' }).addTo(routeLayer)
+    .bindTooltip(clicks.length === 1 ? 'A' : 'B', { permanent: true, direction: 'top' });
+  if (clicks.length < 2) { statusEl.textContent = 'Now click the destination (B).'; return; }
+  try {
+    setBusy(true, 'Downloading the walkable network and routing…');
+    const r = await computeRoute(clicks[0], clicks[1]);
+    L.polyline(r.path.map(n => [n.lat, n.lon]), { color: '#0b6ef3', weight: 6, opacity: 0.85 }).addTo(routeLayer);
+    const mins = Math.max(1, Math.round(r.meters / WALK_SPEED / 60));
+    setBusy(false, `Route: ${(r.meters / 1000).toFixed(2)} km, about ${mins} min on foot. Click again to start a new route.`);
   } catch (err) {
     setBusy(false, err.message);
   }
