@@ -36,7 +36,7 @@ def _read_bbox(pbf: Path, layer: str, boundary_4326: gpd.GeoDataFrame, where: st
         gdf = gdf.set_crs("EPSG:4326")
     print(f"  read {layer}: {len(gdf):,} features in bbox ({time.time() - t0:,.0f} s)")
     if gdf.empty:
-        raise RuntimeError(f"0 features read from {pbf.name}:{layer}; refusing to cache an empty clip")
+        raise RuntimeError(f"no features read from {pbf.name}:{layer}")
     return gdf
 
 

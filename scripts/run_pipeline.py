@@ -5,7 +5,7 @@ from capstone import setup_environment
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser()
     ap.add_argument("step")
     ap.add_argument("city", nargs="?", default="vienna")
     a = ap.parse_args()

@@ -1,0 +1,73 @@
+note: Test areas chosen with the fixed rule in src/capstone/rebuild/splits.py before any training. Each test area is scored once per final model.
+written_utc: '2026-10-12T07:11:05+00:00'
+seed: 42
+split_buffer_m: 200
+vienna:
+  test_districts:
+  - Favoriten
+  - Innere Stadt
+  - Mariahilf
+  - Simmering
+  selection_rule: '3-4 districts minimising the worst |share - 0.20| over real-gap
+    groups; >= 3 gaps per group with >= 20 city-wide; ties: smaller area, then name'
+  test_counts_by_group:
+    estate_passage: 49
+    footpath: 469
+    historic_passage: 4
+    other: 3
+    stairs: 16
+  total_counts_by_group:
+    estate_passage: 280
+    footpath: 2791
+    historic_passage: 22
+    other: 15
+    stairs: 86
+  old_first_study_test_districts:
+  - Innere Stadt
+  - Neubau
+  - Favoriten
+  - Donaustadt
+  old_test_overlap:
+  - Favoriten
+  - Innere Stadt
+  folds:
+    fold_0:
+    - Donaustadt
+    fold_1:
+    - Floridsdorf
+    - Josefstadt
+    - Margareten
+    fold_2:
+    - Alsergrund
+    - Liesing
+    - Meidling
+    - Neubau
+    - Rudolfsheim-Fünfhaus
+    fold_3:
+    - Hernals
+    - Landstraße
+    - Leopoldstadt
+    - Penzing
+    - Wieden
+    fold_4:
+    - Brigittenau
+    - Döbling
+    - Hietzing
+    - Ottakring
+    - Währing
+  fold_rule: greedy balance by real-gap count (sort desc, smallest running total)
+  reach_targets:
+    footpath: 0.5
+    estate_passage: 0.6
+    historic_passage: 0.5
+    stairs: 0.4
+    other: 0.5
+    all: 0.5
+held_out_cities:
+- linz
+- klagenfurt
+held_out_rule: never used for training or tuning; scored once per final model
+previously_used_cities:
+- graz
+- salzburg
+- innsbruck
