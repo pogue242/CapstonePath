@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import shapely
 
-from capstone.labels.micro import INDOOR_VERTICAL_TOUCH_FOW
+from missingpaths.labels.micro import INDOOR_VERTICAL_TOUCH_FOW
 
 STATION_AREA_MIN_SHARE = 0.5
 

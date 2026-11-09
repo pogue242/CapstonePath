@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import shapely
 
-from capstone.geom import aligned_coverage, explode_lines
+from missingpaths.geom import aligned_coverage, explode_lines
 
 CAND_STEP_M = 2.0
 
@@ -62,7 +62,7 @@ def label_candidates(cands: gpd.GeoDataFrame, micro_feats: gpd.GeoDataFrame,
 
     label = np.full(n, "negative", dtype=object)
     reason = np.full(n, "", dtype=object)
-    # already mapped, so we can't call it wrong
+    # along a path that already exists: ignored, unless it's a real gap
     ign = [("osm_way_along", osm_cov >= partial_min),
            ("gip_walkable_along", gip_cov >= partial_min),
            ("station_micro", station_cov >= partial_min),

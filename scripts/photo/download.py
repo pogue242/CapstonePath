@@ -5,8 +5,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from capstone.imagery.tiles import SOURCES, Downloader, Source, append_manifest
-from capstone.rebuild import common as C
+from missingpaths.imagery.tiles import SOURCES, Downloader, Source, append_manifest
+from missingpaths.rebuild import common as C
 
 
 def layer_key(layer: str) -> str:

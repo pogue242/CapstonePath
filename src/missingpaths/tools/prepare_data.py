@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pyogrio
 
-from capstone import config
+from missingpaths import config
 
 PACKAGES = ["numpy", "pandas", "scipy", "geopandas", "shapely", "pyogrio", "networkx", "osmnx",
             "scikit-learn", "lightgbm", "fastapi", "pyyaml", "matplotlib"]

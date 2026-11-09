@@ -1,4 +1,4 @@
-note: Test areas chosen with the fixed rule in src/capstone/rebuild/splits.py before any training. Each test area is scored once per final model.
+note: Test areas chosen with the fixed rule in src/missingpaths/rebuild/splits.py before any training. Each test area is scored once per final model.
 written_utc: '2026-10-12T07:11:05+00:00'
 seed: 42
 split_buffer_m: 200

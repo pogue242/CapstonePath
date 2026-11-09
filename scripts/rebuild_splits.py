@@ -1,15 +1,18 @@
 # pick the test districts and training groups
+from pathlib import Path
 import sys
 from datetime import datetime, timezone
 
-from capstone import setup_environment
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from missingpaths import setup_environment
 import geopandas as gpd
 import pandas as pd
 import yaml
 
-from capstone import config
-from capstone.rebuild import common as C
-from capstone.rebuild import splits as S
+from missingpaths import config
+from missingpaths.rebuild import common as C
+from missingpaths.rebuild import splits as S
 
 REACH_TARGETS = {
     "footpath": 0.50, "estate_passage": 0.60, "historic_passage": 0.50, "stairs": 0.40, "other": 0.50, "all": 0.50,
@@ -30,7 +33,7 @@ def main(city="vienna"):
     train = sorted(set(d["district"]) - set(chosen))
     folds = S.greedy_folds(counts.loc[train].sum(axis=1), 5)
     doc = {
-        "note": "Test areas chosen with the fixed rule in src/capstone/rebuild/splits.py before any training. Each test area is scored once per final model.",
+        "note": "Test areas chosen with the fixed rule in src/missingpaths/rebuild/splits.py before any training. Each test area is scored once per final model.",
         "written_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "seed": 42,
         "split_buffer_m": 200,

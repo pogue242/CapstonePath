@@ -1,7 +1,11 @@
+import sys
+from pathlib import Path
 import argparse
 import json
 
-from capstone import setup_environment
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from missingpaths import setup_environment
 
 
 def main() -> None:
@@ -9,10 +13,10 @@ def main() -> None:
     ap.add_argument("step")
     ap.add_argument("city", nargs="?", default="vienna")
     a = ap.parse_args()
-    from capstone import pipeline as P
+    from missingpaths import pipeline as P
     s, c = a.step, a.city
     if s == "m0":
-        from capstone.tools import prepare_data
+        from missingpaths.tools import prepare_data
         res = prepare_data.main()
     elif s == "m1":
         res = P.m1_clip(c)

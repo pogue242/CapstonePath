@@ -3,7 +3,7 @@ from __future__ import annotations
 import geopandas as gpd
 import pyogrio
 
-from capstone import config
+from missingpaths import config
 
 
 def _cache(city_key: str):
@@ -45,7 +45,7 @@ def districts(city_key: str) -> gpd.GeoDataFrame:
     cfg = config.city(city_key).get("districts")
     if not cfg:
         raise ValueError(f"No district config for {city_key}")
-    from capstone.io.osm import read_polygons
+    from missingpaths.io.osm import read_polygons
     admin = read_polygons(city_key, "admin")
     lvl = str(cfg["admin_level"])
     d = admin[admin["admin_level"].astype(str) == lvl][["name", "geometry"]].copy()

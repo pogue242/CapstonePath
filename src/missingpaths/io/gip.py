@@ -6,7 +6,7 @@ import geopandas as gpd
 import pandas as pd
 import pyogrio
 
-from capstone import config
+from missingpaths import config
 
 BIT_PED, BIT_BIKE, BIT_CAR, BIT_BUS = 1, 2, 4, 8
 

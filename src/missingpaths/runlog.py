@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from capstone.config import CONFIG_DIR, file_sha256, reports_dir
+from missingpaths.config import CONFIG_DIR, file_sha256, reports_dir
 
 COLUMNS = ["timestamp", "run_id", "module", "area", "split", "params_hash", "locked_hash",
            "data_manifest_hash", "metric_name", "metric_value", "note"]

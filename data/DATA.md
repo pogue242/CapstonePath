@@ -1,6 +1,4 @@
-# Data
-
-## Folder layout
+# Folder layout
 
 ```
 data/
@@ -12,11 +10,11 @@ data/
   interim/<city>/
 ```
 
-## Where to download
+# Where to download
 
-| What | Source | Licence |
+| Data | Where | Licence |
 |---|---|---|
-| GIP 26.04: network, reference and lookup tables | [data.gv.at](https://www.data.gv.at), search "GIP" | CC BY 4.0 |
+| GIP 26.04 | [data.gv.at](https://www.data.gv.at), search "GIP" | CC BY 4.0 |
 | OpenStreetMap, Austria | [Geofabrik](https://download.geofabrik.de/europe/austria.html), saved as `austria-260922.osm.pbf` | ODbL |
-| Aerial photos | `scripts/imagery_download.py` and `scripts/photo/download.py` (Stadt Wien, basemap.at) | CC BY 4.0 |
-| City and district boundaries | OSMnx, or the OSM file | ODbL |
+| Aerial photos | Downloaded by the scripts | CC BY 4.0 |
+| City and district boundaries | Downloaded by the scripts | ODbL |

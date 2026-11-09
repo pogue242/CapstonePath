@@ -6,11 +6,11 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 
-from capstone import config, runlog
-from capstone.io import boundary, gip, osm
-from capstone.labels import build as labels_build
-from capstone.labels import match as match_mod
-from capstone.labels import stations
+from missingpaths import config, runlog
+from missingpaths.io import boundary, gip, osm
+from missingpaths.labels import build as labels_build
+from missingpaths.labels import match as match_mod
+from missingpaths.labels import stations
 
 EXPECTED_VIENNA = {
     "links_total": 161395, "walkable_links": 151670, "ped_only_links": 107097,
@@ -34,7 +34,7 @@ def m1_clip(city: str, osm_layers=("lines", "polygons")) -> dict:
 
 
 def reproduction_check(city: str = "vienna") -> dict:
-    from capstone.labels import micro
+    from missingpaths.labels import micro
     links = gip.read_links(city)
     g = gip.summary_counts(links)
     f = micro.aggregate_features(micro.micro_links(links))
@@ -120,7 +120,7 @@ def m2_labels(city: str) -> dict:
 
 
 def walkable_osm(city: str) -> gpd.GeoDataFrame:
-    from capstone.graph.walknet import walkable_mask
+    from missingpaths.graph.walknet import walkable_mask
     lines = osm.read_lines(city)
     w = lines[walkable_mask(lines)].explode(index_parts=False).reset_index(drop=True)
     return w[w.geometry.notna() & ~w.geometry.is_empty]
@@ -190,3 +190,7 @@ def m3_match(city: str, write_review: bool = True) -> dict:
     runlog.log_run("M3_match", "gip_only_targets", int((tgt["status"] == "gip_only").sum()),
                    area=city, note=json.dumps(out["status_targets"]))
     return out
+
+
+def graph_path(city: str, variant: str):
+    return config.interim_dir(city) / f"walk_graph_{variant}.gpkg"

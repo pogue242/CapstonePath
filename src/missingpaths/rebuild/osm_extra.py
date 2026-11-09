@@ -5,8 +5,8 @@ import geopandas as gpd
 import pandas as pd
 import pyogrio
 
-from capstone import config
-from capstone.io.osm import parse_tags
+from missingpaths import config
+from missingpaths.io.osm import parse_tags
 
 AREA_KEYS = ["highway", "area:highway", "area", "footway", "place", "surface"]
 POINT_KEYS = ["entrance", "addr:housenumber", "door", "level", "barrier", "highway"]

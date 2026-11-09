@@ -3,9 +3,9 @@ from __future__ import annotations
 import geopandas as gpd
 import pandas as pd
 
-from capstone import config
-from capstone.io import gip, osm
-from capstone.labels import micro, stations
+from missingpaths import config
+from missingpaths.io import gip, osm
+from missingpaths.labels import micro, stations
 
 TARGET_CLASSES = ("passage", "stairs")
 

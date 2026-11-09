@@ -1,20 +1,23 @@
 # pick the photo squares and make the answer key
+from pathlib import Path
 import json
 import sys
 
-from capstone import setup_environment
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+
+from missingpaths import setup_environment
 import geopandas as gpd
 import numpy as np
 import pandas as pd
 import shapely
 import yaml
 
-from capstone import config
-from capstone import pipeline as P
-from capstone.imagery.tiles import tiles_for_bbox
-from capstone.io import gip, osm
-from capstone.rebuild import common as C
-from capstone.rebuild import osm_extra
+from missingpaths import config
+from missingpaths import pipeline as P
+from missingpaths.imagery.tiles import tiles_for_bbox
+from missingpaths.io import gip, osm
+from missingpaths.rebuild import common as C
+from missingpaths.rebuild import osm_extra
 
 SQ = 160.0
 ZOOM = 20

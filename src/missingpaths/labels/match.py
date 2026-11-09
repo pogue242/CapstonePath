@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import shapely
 
-from capstone.geom import aligned_coverage, explode_lines, match_status
+from missingpaths.geom import aligned_coverage, explode_lines, match_status
 
 REVIEW_STRATA = {"passage_historic": 30, "passage_estate": 30, "stairs": 30}
 MICRO_TAG_HIGHWAYS = {"steps"}

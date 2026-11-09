@@ -14,11 +14,11 @@ from pathlib import Path
 
 import numpy as np
 
-from capstone import config
+from missingpaths import config
 
 EARTH = 6378137.0
 ORIGIN = math.pi * EARTH
-USER_AGENT = "capstone/0.1 (CSCI 499 research; polite single-user download)"
+USER_AGENT = "missingpaths/0.1 (CSCI 499 student project)"
 
 
 @dataclass(frozen=True)

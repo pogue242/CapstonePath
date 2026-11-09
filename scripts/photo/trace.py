@@ -15,7 +15,7 @@ from skimage.measure import label as cc_label
 from skimage.morphology import remove_small_objects, skeletonize
 
 import photo_common as PC
-from capstone.labels.candidates_label import feature_hits
+from missingpaths.labels.candidates_label import feature_hits
 
 CRS = "EPSG:31256"
 SCALE = 1.0 / np.cos(np.radians(48.2))

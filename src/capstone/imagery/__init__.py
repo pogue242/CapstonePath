@@ -1,1 +1,0 @@
-COMMON_RES_M = 0.30

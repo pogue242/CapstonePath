@@ -9,7 +9,6 @@ import yaml
 
 ROOT = Path(os.environ.get("CAPSTONE_ROOT", Path(__file__).resolve().parents[2]))
 CONFIG_DIR = ROOT / "config"
-DOCS_DIR = ROOT / "docs"
 EXCLUDED_DATA_PARTS = ("A_routingexport",)
 
 

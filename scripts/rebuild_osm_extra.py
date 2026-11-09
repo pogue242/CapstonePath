@@ -1,10 +1,13 @@
 # clip pedestrian areas and entrances from the OSM file
+from pathlib import Path
 import sys
 import time
 
-from capstone import setup_environment
-from capstone.io import boundary
-from capstone.rebuild import osm_extra
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from missingpaths import setup_environment
+from missingpaths.io import boundary
+from missingpaths.rebuild import osm_extra
 
 
 def main(city: str) -> None:

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
-from capstone import config, runlog
+from missingpaths import config, runlog
 
 
 def interim(city: str) -> Path:

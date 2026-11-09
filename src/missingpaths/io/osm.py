@@ -8,7 +8,7 @@ import geopandas as gpd
 import pandas as pd
 import pyogrio
 
-from capstone import config
+from missingpaths import config
 
 HSTORE = re.compile(r'"((?:[^"\\]|\\.)*)"=>"((?:[^"\\]|\\.)*)"')
 
