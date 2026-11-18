@@ -55,7 +55,8 @@
 <script src="vendor/leaflet.js"></script>
 <script>
 /* ---------- 1. Base map ---------- */
-const map = L.map('map', { preferCanvas: true }).setView([30, 10], 2);
+const map = L.map('map', { preferCanvas: true }).setView([48.2082, 16.3738], 12);
+
 // Official OSM tiles require a Referer header, so this page must be served over http(s)
 // (e.g. http://localhost:8000 or a real website), not opened as a file:// URL.
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -122,22 +123,41 @@ async function geocode(name) {
   return hits.find(h => h.osm_type === 'relation') || hits[0];
 }
 
-/* ---------- 5. Fetch ways from Overpass ---------- */
-const OVERPASS = 'https://overpass-api.de/api/interpreter';
+/* ---------- 5. Load ways from the local file ---------- */
+const DATA_URL = 'data/city.json';
 const HIGHWAYS = 'footway|pedestrian|path|steps';
+const PED = new Set(HIGHWAYS.split('|'));
+const NOT_WALKABLE = new Set(['motorway', 'motorway_link', 'trunk', 'trunk_link',
+  'bridleway', 'proposed', 'construction', 'raceway', 'bus_guideway', 'escape']);
 
-async function overpass(filterBlock) {
-  const query = `[out:json][timeout:90];${filterBlock}out geom;`;
-  const res = await fetch(OVERPASS, { method: 'POST', body: 'data=' + encodeURIComponent(query) });
-  if (!res.ok) throw new Error('Overpass error ' + res.status + ' – try a smaller area.');
-  return (await res.json()).elements;
+const isPed = t => PED.has(t.highway);
+const isWalkable = t => t.highway && !NOT_WALKABLE.has(t.highway) && t.foot !== 'no' && t.access !== 'private';
+
+let allWays = null; // parsed once, then reused for every search and route
+async function loadWays() {
+  if (!allWays) {
+    const res = await fetch(DATA_URL);
+    if (!res.ok) throw new Error('Could not load ' + DATA_URL + ' (' + res.status + '). Serve the folder over http.');
+    allWays = (await res.json()).elements.filter(el => el.type === 'way' && el.geometry);
+  }
+  return allWays;
 }
 
-const queryByArea = osmId =>
-  overpass(`area(${osmId})->.a;way["highway"~"^(${HIGHWAYS})$"](area.a);`);
+// Does any point of the way fall inside the box? (bounds check first as a quick reject)
+function inBox(way, s, w, n, e) {
+  const b = way.bounds;
+  if (b && (b.maxlat < s || b.minlat > n || b.maxlon < w || b.minlon > e)) return false;
+  return way.geometry.some(p => p && p.lat >= s && p.lat <= n && p.lon >= w && p.lon <= e);
+}
 
-const queryByBbox = (s, w, n, e) =>
-  overpass(`way["highway"~"^(${HIGHWAYS})$"](${s},${w},${n},${e});`);
+// Overview: pedestrian ways only
+const queryByArea = async () => (await loadWays()).filter(x => isPed(x.tags || {}));
+const queryByBbox = async (s, w, n, e) =>
+  (await loadWays()).filter(x => isPed(x.tags || {}) && inBox(x, s, w, n, e));
+
+// Routing: pedestrian ways plus ordinary walkable streets
+const queryWalkable = async (s, w, n, e) =>
+  (await loadWays()).filter(x => { const t = x.tags || {}; return (isPed(t) || isWalkable(t)) && inBox(x, s, w, n, e); });
 
 /* ---------- 6. Draw ---------- */
 function clearPaths() { for (const k in groups) groups[k].clearLayers(); }
@@ -205,7 +225,7 @@ document.getElementById('search').addEventListener('submit', async e => {
 });
 
 document.getElementById('view').addEventListener('click', async () => {
-  if (map.getZoom() < 13) { statusEl.textContent = 'Zoom in a little further (level 13+), then try again.'; return; }
+  if (map.getZoom() < 10) { statusEl.textContent = 'Zoom in a little further (level 10+), then try again.'; return; }
   try {
     setBusy(true, 'Downloading paths for this view…');
     const b = map.getBounds();
@@ -329,10 +349,9 @@ async function computeRoute(a, b) {
   if (haversine({ lat: a.lat, lon: a.lng }, { lat: b.lat, lon: b.lng }) > 16000) {
     throw new Error('Those points are more than 16 km apart. Pick closer points, or use a routing server (see notes).');
   }
-  // Same overpass() call, endpoint and OSM data as the overview. The network is the overview's
-  // pedestrian ways (same HIGHWAYS filter) plus ordinary walkable streets, so every drawn path is routable.
-  const box = `(${s},${w},${n},${e})`;
-  const ways = await overpass(`(${WALKABLE}${box};way["highway"~"^(${HIGHWAYS})$"]${box};);`);
+  // Same local data as the overview: its pedestrian ways plus ordinary walkable streets,
+  // so every drawn path is routable.
+  const ways = await queryWalkable(s, w, n, e);
   const nodes = buildGraph(ways);
   if (!nodes.length) throw new Error('No walkable network found around those points.');
   const A = nearestNode(nodes, a), B = nearestNode(nodes, b);
@@ -442,6 +461,20 @@ map.on('click', e => {
   if (pts.A && pts.B) doRoute();
   else statusEl.textContent = which === 'A' ? 'Now click the destination (B).' : 'Now click the origin (A).';
 });
+
+/* ---------- 10. Autoload the overview on page load ---------- */
+(async () => {
+  try {
+    setBusy(true, 'Loading local path data…');
+    const ways = await queryByArea();          // all pedestrian ways in data/city.json
+    const counts = draw(ways);
+    const pts = ways.flatMap(w => w.bounds ? [[w.bounds.minlat, w.bounds.minlon], [w.bounds.maxlat, w.bounds.maxlon]] : []);
+    if (pts.length) map.fitBounds(pts);
+    setBusy(false, summary(counts));
+  } catch (err) {
+    setBusy(false, err.message);
+  }
+})();
 </script>
 </body>
 </html>
