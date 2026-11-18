@@ -28,6 +28,7 @@
   #map { flex: 1; min-height: 0; }
   .legend { background: var(--bg); color: var(--fg); padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; line-height: 1.7; }
   .legend label { display: flex; align-items: center; gap: 7px; cursor: pointer; }
+  .opt { font-size: 13px; color: var(--fg); display: flex; align-items: center; gap: 5px; cursor: pointer; }
   .leaflet-container.routing { cursor: crosshair; }
   button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
   .swatch { width: 22px; height: 0; border-top: 4px solid; }
@@ -48,6 +49,8 @@
     <button id="go" type="submit">Show paths</button>
   </form>
   <button id="view" class="secondary" type="button" title="Load paths for the area currently on screen">Load current view</button>
+  <label class="opt" title="Never use stairs (unless tagged with a wheelchair ramp) or ways tagged wheelchair=no"><input type="checkbox" id="optSteps"> Step-free</label>
+  <label class="opt" title="Use elevation: uphill and steep downhill cost more (Tobler hiking function)"><input type="checkbox" id="optHills"> Weigh hills</label>
   <div id="status" role="status">Type an origin and a destination, or turn on “Pick on map” and click. Use the city box to show the path overview.</div>
 </header>
 <div id="map"></div>
@@ -251,9 +254,35 @@ const haversine = (a, b) => {
   return 2 * R * Math.asin(Math.sqrt(h));
 };
 
-// Overpass "out geom" gives each way's node ids and coordinates side by side.
+// Step-free rule: a hard exclusion, not a weight. Steps are allowed only if tagged with a wheelchair ramp.
+const stepFreeBlocked = t =>
+  (t.highway === 'steps' && t['ramp:wheelchair'] !== 'yes') || t.wheelchair === 'no';
+
+// Tobler's hiking function: walking speed (m/s) falls off with slope, fastest on a slight (-5%) downhill.
+const V_MAX = 6 / 3.6;
+function toblerTime(d, rise) {
+  if (d === 0) return 0;
+  const s = Math.max(-0.3, Math.min(0.3, rise / d));
+  return d / (6 * Math.exp(-3.5 * Math.abs(s + 0.05)) / 3.6);
+}
+
+// Ground elevation is wrong on bridges and tunnels, so interpolate between the way's two ends there.
+function wayElevations(w, t) {
+  const g = w.geometry;
+  const e = g.map(p => (p ? elevAt(p.lat, p.lon) : undefined));
+  if ((t.bridge || t.tunnel) && g.length > 1 && !g.includes(null) && e[0] !== undefined && e[e.length - 1] !== undefined) {
+    const cum = [0];
+    for (let i = 1; i < g.length; i++) cum.push(cum[i - 1] + haversine(g[i - 1], g[i]));
+    const total = cum[cum.length - 1] || 1;
+    return e.map((_, i) => e[0] + (e[e.length - 1] - e[0]) * cum[i] / total);
+  }
+  return e;
+}
+
 // Ways that share a node id are connected, which is what makes it a graph.
-function buildGraph(ways) {
+// Each edge is [neighbour, cost, metres]. Cost is metres, or seconds when opt.hills is on (then
+// uphill and downhill differ, so a→b and b→a get separate costs).
+function buildGraph(ways, opt = {}) {
   const nodes = new Map();
   const get = (id, p) => {
     if (!nodes.has(id)) nodes.set(id, { id, lat: p.lat, lon: p.lon, adj: [] });
@@ -261,12 +290,22 @@ function buildGraph(ways) {
   };
   for (const w of ways) {
     if (!w.nodes || !w.geometry) continue;
+    const t = w.tags || {};
+    if (opt.stepFree && stepFreeBlocked(t)) continue;
+    const ele = opt.hills ? wayElevations(w, t) : null;
     for (let i = 1; i < w.nodes.length; i++) {
       const pa = w.geometry[i - 1], pb = w.geometry[i];
       if (!pa || !pb) continue;
       const a = get(w.nodes[i - 1], pa), b = get(w.nodes[i], pb);
       const d = haversine(a, b);
-      a.adj.push([b, d]); b.adj.push([a, d]); // one-way tags are ignored for walking
+      let up = d, down = d; // cost a→b, b→a (one-way tags are ignored for walking)
+      if (opt.hills) {
+        if (ele[i] !== undefined && ele[i - 1] !== undefined) {
+          const rise = ele[i] - ele[i - 1];
+          up = toblerTime(d, rise); down = toblerTime(d, -rise);
+        } else up = down = d / WALK_SPEED;
+      }
+      a.adj.push([b, up, d]); b.adj.push([a, down, d]);
     }
   }
   return keepLargestComponent(nodes);
@@ -322,49 +361,102 @@ class Heap {
   }
 }
 
-// A* with straight-line distance as the heuristic (never overestimates, so the route is shortest).
-function astar(start, goal) {
+// A* with straight-line distance as the heuristic. With hills on, costs are seconds, so the heuristic
+// divides by the fastest possible speed and still never overestimates.
+function astar(start, goal, opt = {}) {
+  const hs = opt.hills ? 1 / V_MAX : 1;
   const g = new Map([[start, 0]]), prev = new Map(), closed = new Set(), open = new Heap();
-  open.push(start, haversine(start, goal));
+  open.push(start, haversine(start, goal) * hs);
   while (open.size) {
     const u = open.pop();
     if (u === goal) break;
     if (closed.has(u)) continue;
     closed.add(u);
-    for (const [v, d] of u.adj) {
-      const ng = g.get(u) + d;
-      if (ng < (g.get(v) ?? Infinity)) { g.set(v, ng); prev.set(v, u); open.push(v, ng + haversine(v, goal)); }
+    for (const [v, c] of u.adj) {
+      const ng = g.get(u) + c;
+      if (ng < (g.get(v) ?? Infinity)) { g.set(v, ng); prev.set(v, u); open.push(v, ng + haversine(v, goal) * hs); }
     }
   }
   if (start !== goal && !prev.has(goal)) return null;
   const path = [goal];
   for (let u = goal; prev.has(u);) { u = prev.get(u); path.push(u); }
-  return { path: path.reverse(), meters: g.get(goal) };
+  path.reverse();
+  let meters = 0;
+  for (let i = 1; i < path.length; i++) meters += haversine(path[i - 1], path[i]);
+  return { path, meters, seconds: opt.hills ? g.get(goal) : meters / WALK_SPEED };
 }
 
-async function computeRoute(a, b) {
+// ---- elevation: Terrarium DEM tiles, fetched once per area and decoded in the browser ----
+const DEM_Z = 13;
+const DEM_URL = (z, x, y) => `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${x}/${y}.png`; // swap for a local path to go offline
+const demTiles = new Map(); // "x/y" -> RGBA bytes
+
+const demXY = (lat, lon) => {
+  const n = 2 ** DEM_Z, r = lat * Math.PI / 180;
+  return { x: (lon + 180) / 360 * n, y: (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n };
+};
+
+async function loadDemTile(x, y) {
+  const key = x + '/' + y;
+  if (demTiles.has(key)) return;
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.src = DEM_URL(DEM_Z, x, y);
+  await img.decode();
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0);
+  demTiles.set(key, ctx.getImageData(0, 0, 256, 256).data);
+}
+
+async function prefetchDem(s, w, n, e) {
+  const p = demXY(n, w), q = demXY(s, e), jobs = [];
+  for (let x = Math.floor(p.x); x <= Math.floor(q.x); x++)
+    for (let y = Math.floor(p.y); y <= Math.floor(q.y); y++) jobs.push(loadDemTile(x, y));
+  try { await Promise.all(jobs); }
+  catch { throw new Error('Could not load elevation tiles. Untick “Weigh hills”, or check the connection.'); }
+}
+
+function elevAt(lat, lon) {
+  const { x, y } = demXY(lat, lon), tx = Math.floor(x), ty = Math.floor(y);
+  const px = demTiles.get(tx + '/' + ty);
+  if (!px) return undefined;
+  const i = (Math.min(255, Math.floor((x - tx) * 256)) + 256 * Math.min(255, Math.floor((y - ty) * 256))) * 4;
+  return px[i] * 256 + px[i + 1] + px[i + 2] / 256 - 32768; // Terrarium encoding, metres
+}
+
+async function computeRoute(a, b, opt = {}) {
   const pad = Math.max(0.003, 0.3 * Math.max(Math.abs(a.lat - b.lat), Math.abs(a.lng - b.lng)));
   const s = Math.min(a.lat, b.lat) - pad, n = Math.max(a.lat, b.lat) + pad;
   const w = Math.min(a.lng, b.lng) - pad, e = Math.max(a.lng, b.lng) + pad;
-
-  //no more max routing distance
-  // if (haversine({ lat: a.lat, lon: a.lng }, { lat: b.lat, lon: b.lng }) > 16000) {
-  //   throw new Error('Those points are more than 16 km apart. Pick closer points, or use a routing server (see notes).');
-  // }
+  if (haversine({ lat: a.lat, lon: a.lng }, { lat: b.lat, lon: b.lng }) > 16000) {
+    throw new Error('Those points are more than 16 km apart. Pick closer points, or use a routing server (see notes).');
+  }
   // Same local data as the overview: its pedestrian ways plus ordinary walkable streets,
   // so every drawn path is routable.
+  if (opt.hills) await prefetchDem(s, w, n, e);
   const ways = await queryWalkable(s, w, n, e);
-  const nodes = buildGraph(ways);
-  if (!nodes.length) throw new Error('No walkable network found around those points.');
-  const A = nearestNode(nodes, a), B = nearestNode(nodes, b);
-  if (A.dist > 300 || B.dist > 300) throw new Error('One of the points is more than 300 m from any walkable way.');
-  const r = astar(A.node, B.node);
-  if (!r) throw new Error('No walking connection found inside this area.');
-  return r;
+
+  const find = o => {
+    const nodes = buildGraph(ways, o);
+    if (!nodes.length) return null;
+    const A = nearestNode(nodes, a), B = nearestNode(nodes, b);
+    if (A.dist > 300 || B.dist > 300) throw new Error('One of the points is more than 300 m from any walkable way.');
+    return astar(A.node, B.node, o);
+  };
+  const r = find(opt);
+  if (r) return r;
+  if (opt.stepFree) {
+    let withSteps = null;
+    try { withSteps = find({ ...opt, stepFree: false }); } catch { /* ignore */ }
+    if (withSteps) throw new Error('No step-free route exists between these points in the data (a route with stairs does).');
+  }
+  throw new Error('No walking connection found inside this area.');
 }
 
 /* ---------- 9. Origin / destination: search boxes first, map clicks as an option ---------- */
 const fromEl = document.getElementById('from'), toEl = document.getElementById('to');
+const optSteps = document.getElementById('optSteps'), optHills = document.getElementById('optHills');
 const inputOf = which => (which === 'A' ? fromEl : toEl);
 const pts = { A: null, B: null }, markers = {};
 let routeLine = null, lastGeocode = 0;
@@ -425,16 +517,20 @@ async function doRoute() {
     setBusy(true, 'Finding places…');
     const a = await resolve('A'), b = await resolve('B');
     setBusy(true, 'Downloading the walkable network and routing…');
-    const r = await computeRoute(a, b);
+    const opt = { stepFree: optSteps.checked, hills: optHills.checked };
+    const r = await computeRoute(a, b, opt);
     clearRouteLine();
     routeLine = L.polyline(r.path.map(n => [n.lat, n.lon]), { color: '#0b6ef3', weight: 6, opacity: 0.85 }).addTo(routeLayer);
     map.fitBounds(routeLine.getBounds(), { padding: [50, 50] });
-    const mins = Math.max(1, Math.round(r.meters / WALK_SPEED / 60));
-    setBusy(false, `Route: ${(r.meters / 1000).toFixed(2)} km, about ${mins} min on foot.`);
+    const mins = Math.max(1, Math.round(r.seconds / 60));
+    const flags = [opt.stepFree && 'step-free', opt.hills && 'hill-aware'].filter(Boolean).join(', ');
+    setBusy(false, `Route: ${(r.meters / 1000).toFixed(2)} km, about ${mins} min on foot${flags ? ' (' + flags + ')' : ''}.`);
   } catch (err) {
     setBusy(false, err.message);
   }
 }
+
+for (const el of [optSteps, optHills]) el.addEventListener('change', () => { if (pts.A && pts.B) doRoute(); });
 
 document.getElementById('routeForm').addEventListener('submit', e => { e.preventDefault(); doRoute(); });
 
