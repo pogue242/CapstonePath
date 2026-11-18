@@ -346,9 +346,11 @@ async function computeRoute(a, b) {
   const pad = Math.max(0.003, 0.3 * Math.max(Math.abs(a.lat - b.lat), Math.abs(a.lng - b.lng)));
   const s = Math.min(a.lat, b.lat) - pad, n = Math.max(a.lat, b.lat) + pad;
   const w = Math.min(a.lng, b.lng) - pad, e = Math.max(a.lng, b.lng) + pad;
-  if (haversine({ lat: a.lat, lon: a.lng }, { lat: b.lat, lon: b.lng }) > 16000) {
-    throw new Error('Those points are more than 16 km apart. Pick closer points, or use a routing server (see notes).');
-  }
+
+  //no more max routing distance
+  // if (haversine({ lat: a.lat, lon: a.lng }, { lat: b.lat, lon: b.lng }) > 16000) {
+  //   throw new Error('Those points are more than 16 km apart. Pick closer points, or use a routing server (see notes).');
+  // }
   // Same local data as the overview: its pedestrian ways plus ordinary walkable streets,
   // so every drawn path is routable.
   const ways = await queryWalkable(s, w, n, e);
